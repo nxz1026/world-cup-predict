@@ -24,7 +24,7 @@ jobs:
         run: pip install requests
 
       - name: Run prediction
-        run: python3 scripts/predict_wc.py > /tmp/predict_output.txt 2>/tmp/predict_stderr.txt
+        run: python3 scripts/predict_wc.py 2>&1 | tee /tmp/predict_output.txt
 
       - name: Format email
         id: format
@@ -33,15 +33,17 @@ jobs:
           import json, sys
           from datetime import datetime, timezone, timedelta
 
-          # Read prediction JSON from stdout only
+          # Read prediction output (may contain mixed JSON + log lines)
           output = open('/tmp/predict_output.txt').read().strip()
           
           if not output:
               print("ERROR: No output from prediction script")
               sys.exit(1)
           
+          # Use raw_decode to parse only the first JSON object
+          decoder = json.JSONDecoder()
           try:
-              data = json.loads(output)
+              data, _ = decoder.raw_decode(output)
           except json.JSONDecodeError as e:
               print(f"JSON parse error: {e}")
               print(f"Output was: {output[:500]}...")
