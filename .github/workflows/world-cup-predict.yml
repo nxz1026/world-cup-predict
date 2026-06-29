@@ -30,7 +30,7 @@ jobs:
         id: format
         run: |
           python3 << 'PYEOF'
-          import json, sys
+          import json, sys, os
           from datetime import datetime, timezone, timedelta
 
           # Read prediction output (may contain mixed JSON + log lines)
@@ -89,12 +89,19 @@ jobs:
                   lines_out.append("")
           
           email_body = "\n".join(lines_out)
+          
+          # Write to file for debugging
           with open('/tmp/email_body.txt', 'w') as f:
               f.write(email_body)
           
-          # Set outputs
-          subject = f"⚽ 世界杯预测 {datetime.now(timezone(timedelta(hours=8))).strftime('%m/%d')}"
-          print(f"subject={subject}")
+          # Set outputs via GITHUB_OUTPUT
+          github_output = os.environ.get('GITHUB_OUTPUT', '/dev/null')
+          with open(github_output, 'a') as f:
+              subject = f"⚽ 世界杯预测 {datetime.now(timezone(timedelta(hours=8))).strftime('%m/%d')}"
+              f.write(f"subject={subject}\n")
+              f.write(f"body<<EOF\n{email_body}\nEOF\n")
+          
+          print(f"Email body written ({len(email_body)} chars)")
           print(email_body)
           PYEOF
 
