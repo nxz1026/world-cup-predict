@@ -24,66 +24,57 @@ jobs:
         run: pip install requests
 
       - name: Run prediction
-        run: python3 scripts/predict_wc.py > /tmp/predict_output.txt 2>/tmp/predict_stderr.txt
+        run: python3 scripts/predict_wc.py > /tmp/predict_output.txt 2>&1 || (cat /tmp/predict_output.txt && exit 1)
+
+      - name: Show prediction output
+        run: cat /tmp/predict_output.txt
 
       - name: Format email
         id: format
         shell: bash
         run: |
-          python3 -c "
+          python3 << 'PYEOF'
           import json, sys
-          from datetime import datetime, timezone, timedelta
-
           output = open('/tmp/predict_output.txt').read().strip()
           if not output:
               print('ERROR: No output')
               sys.exit(1)
-
-          json_start = output.find('{')
+          json_start = output.rfind('{')
           if json_start == -1:
               print('ERROR: No JSON found')
               sys.exit(1)
-
           decoder = json.JSONDecoder()
           data, _ = decoder.raw_decode(output[json_start:])
-
+          from datetime import datetime, timezone, timedelta
           bjt = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M')
           lines_out = []
-          lines_out.append(f'⚽ 世界杯预测 | {bjt}')
-          lines_out.append('=' * 30)
-          lines_out.append('')
-
+          lines_out.append(f"⚽ 世界杯预测 | {bjt}")
+          lines_out.append("=" * 30)
+          lines_out.append("")
           cal = data.get('calibration', {})
           if cal.get('total_matches', 0) > 0:
-              lines_out.append(f'📊 校准：{cal[\"total_matches\"]}场 | 主胜 {cal.get(\"home_win_rate\",0)*100:.0f}% 平 {cal.get(\"draw_rate\",0)*100:.0f}% 客胜 {cal.get(\"away_win_rate\",0)*100:.0f}%')
+              lines_out.append(f"📊 校准：{cal['total_matches']}场 | 主胜 {cal.get('home_win_rate',0)*100:.0f}% 平 {cal.get('draw_rate',0)*100:.0f}% 客胜 {cal.get('away_win_rate',0)*100:.0f}%")
               if cal.get('odds_accuracy', 0) > 0:
-                  lines_out.append(f'   热门正确率：{cal[\"odds_accuracy\"]*100:.0f}%')
-              lines_out.append('')
-
+                  lines_out.append(f"   热门正确率：{cal['odds_accuracy']*100:.0f}%")
+              lines_out.append("")
           preds = data.get('predictions', [])
           if not preds:
-              lines_out.append('📌 未来 24h 无待预测比赛')
+              lines_out.append("📌 未来 24h 无待预测比赛")
           else:
-              lines_out.append(f'🔥 待预测：{len(preds)} 场')
-              lines_out.append('')
+              lines_out.append(f"🔥 待预测：{len(preds)} 场")
+              lines_out.append("")
               for p in preds:
-                  poisson_str = ' / '.join(f'{t[\"score\"]}({t[\"prob\"]:.0%})' for t in p.get('poisson_top3', [])[:3])
-                  lines_out.append(f'🏟 {p[\"match\"]}')
-                  lines_out.append(f'   方向：{p[\"direction\"]} {p[\"stars\"]}')
-                  lines_out.append(f'   比分：{poisson_str}')
-                  lines_out.append(f'   λ：{p.get(\"lambda_home\",0)}/{p.get(\"lambda_away\",0)} | {p.get(\"over_under\",\"\")} | BTTS {p.get(\"btts\",\"\")}')
-                  lines_out.append('')
-
-          email_body = '\n'.join(lines_out)
+                  poisson_str = " / ".join(f"{t['score']}({t['prob']:.0%})" for t in p.get('poisson_top3', [])[:3])
+                  lines_out.append(f"🏟 {p['match']}")
+                  lines_out.append(f"   方向：{p['direction']} {p['stars']}")
+                  lines_out.append(f"   比分：{poisson_str}")
+                  lines_out.append(f"   λ：{p.get('lambda_home',0)}/{p.get('lambda_away',0)} | {p.get('over_under','')} | BTTS {p.get('btts','')}")
+                  lines_out.append("")
+          email_body = "\n".join(lines_out)
           with open('/tmp/email_body.txt', 'w') as f:
               f.write(email_body)
           print(email_body)
-          " > /tmp/email_stdout.txt 2>&1
-          
-          # Show output for debugging
-          cat /tmp/email_stdout.txt
-          
-          # Set step outputs
+          PYEOF
           echo "subject=⚽ 世界杯预测 $(TZ=Asia/Shanghai date +%m/%d)" >> "$GITHUB_OUTPUT"
           echo "body<<EOF" >> "$GITHUB_OUTPUT"
           cat /tmp/email_body.txt >> "$GITHUB_OUTPUT"
