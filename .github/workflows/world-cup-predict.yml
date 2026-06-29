@@ -23,8 +23,11 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Cleanup old predictions (retain 7 days)
+        run: python3 scripts/predict_wc.py --cleanup
+
       - name: Run prediction
-        run: python3 scripts/predict_wc.py > /tmp/predict_output.txt 2>/tmp/predict_stderr.txt
+        run: python3 scripts/predict_wc.py > /tmp/predict_output.txt 2>/tmp/predict_stderr.txt || (cat /tmp/predict_stderr.txt && cat /tmp/predict_output.txt && exit 1)
 
       - name: Show stderr (debug)
         run: cat /tmp/predict_stderr.txt
@@ -34,10 +37,9 @@ jobs:
         shell: bash
         run: |
           python3 << 'PYEOF'
-          import json, sys
+          import json, sys, os
           from datetime import datetime, timezone, timedelta
 
-          # Read ONLY stdout (clean JSON, no log lines)
           output = open('/tmp/predict_output.txt').read().strip()
           if not output:
               print('ERROR: No JSON output')
@@ -50,48 +52,62 @@ jobs:
               print(f'Output: {output[:500]}...')
               sys.exit(1)
 
-          # Format email body
           bjt = datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M')
           lines_out = []
-          lines_out.append(f"⚽ 世界杯预测 | {bjt}")
-          lines_out.append("=" * 30)
-          lines_out.append("")
+          lines_out.append(f'⚽ 世界杯预测 | {bjt}')
+          lines_out.append('=' * 30)
+          lines_out.append('')
 
-          cal = data.get('calibration', {})
-          if cal.get('total_matches', 0) > 0:
-              lines_out.append(f"📊 校准：{cal['total_matches']}场 | 主胜 {cal.get('home_win_rate',0)*100:.0f}% 平 {cal.get('draw_rate',0)*100:.0f}% 客胜 {cal.get('away_win_rate',0)*100:.0f}%")
+          status = data.get('status', 'ok')
+          if status == 'no_matches':
+              lines_out.append('📌 未来 24h 无比赛，跳过预测')
+              lines_out.append('')
+              lines_out.append(f'数据窗口：{data.get("data_window", "")}。预测已跳过。')
+          elif status == 'no_future_matches':
+              cal = data.get('calibration', {})
+              lines_out.append(f'📊 校准：{cal.get("total_matches",0)}场已结束')
+              lines_out.append(f'   主胜 {cal.get("home_win_rate",0)*100:.0f}%  平 {cal.get("draw_rate",0)*100:.0f}%  客胜 {cal.get("away_win_rate",0)*100:.0f}%')
               if cal.get('odds_accuracy', 0) > 0:
-                  lines_out.append(f"   热门正确率：{cal['odds_accuracy']*100:.0f}%")
-              lines_out.append("")
-
-          preds = data.get('predictions', [])
-          if not preds:
-              lines_out.append("📌 未来 24h 无待预测比赛")
+                  lines_out.append(f'   热门正确率：{cal["odds_accuracy"]*100:.0f}%')
+              lines_out.append('')
+              lines_out.append('📌 未来 24h 内无待预测比赛')
           else:
-              lines_out.append(f"🔥 待预测：{len(preds)} 场")
-              lines_out.append("")
-              for p in preds:
-                  top3 = p.get('top3_scores', [])[:3]
-                  poisson_str = " / ".join(f"{t['score']}({t['prob']*100:.0f}%)" for t in top3)
-                  lines_out.append(f"🏟 {p['match']}")
-                  lines_out.append(f"   方向：{p['direction']} {p['stars']}")
-                  if poisson_str:
-                      lines_out.append(f"   比分：{poisson_str}")
-                  lines_out.append(f"   xG：{p.get('expected_goals_home',0)}/{p.get('expected_goals_away',0)} | {p.get('over_under','')} | BTTS {p.get('btts','')}")
-                  lines_out.append("")
+              cal = data.get('calibration', {})
+              if cal.get('total_matches', 0) > 0:
+                  lines_out.append(f'📊 校准：{cal["total_matches"]}场 | 主胜 {cal.get("home_win_rate",0)*100:.0f}%  平 {cal.get("draw_rate",0)*100:.0f}%  客胜 {cal.get("away_win_rate",0)*100:.0f}%')
+                  if cal.get('odds_accuracy', 0) > 0:
+                      lines_out.append(f'   热门正确率：{cal["odds_accuracy"]*100:.0f}%')
+                  lines_out.append('')
 
-          email_body = "\n".join(lines_out)
+              preds = data.get('predictions', [])
+              if not preds:
+                  lines_out.append('📌 未来 24h 内无待预测比赛')
+              else:
+                  lines_out.append(f'🔥 待预测：{len(preds)} 场')
+                  lines_out.append('')
+                  for p in preds:
+                      top3 = p.get('poisson_top3', [])[:3]
+                      poisson_str = ' / '.join(f'{t["score"]}({t["prob"]*100:.0f}%)' for t in top3)
+                      ci_home = p.get('lambda_home_ci95', (0, 0))
+                      ci_away = p.get('lambda_away_ci95', (0, 0))
+                      lines_out.append(f'🏟 {p["match"]}')
+                      lines_out.append(f'   方向：{p["direction"]} {p["stars"]}')
+                      if poisson_str:
+                          lines_out.append(f'   比分：{poisson_str}')
+                      lines_out.append(f'   xG：{lambda_home if (lambda_home := p.get("lambda_home",0)) else 0} [{ci_home[0]}-{ci_home[1]}] / {lambda_away if (lambda_away := p.get("lambda_away",0)) else 0} [{ci_away[0]}-{ci_away[1]}]')
+                      lines_out.append(f'   {p.get("over_under","")} | BTTS {p.get("btts","")}')
+                      lines_out.append('')
 
-          # Set outputs via GITHUB_OUTPUT
-          github_output = '/tmp/github_output.txt'
-          with open(github_output, 'w') as f:
-              subject = f"⚽ 世界杯预测 {datetime.now(timezone(timedelta(hours=8))).strftime('%m/%d')}"
-              f.write(f"subject={subject}\n")
-              f.write(f"body<<EOF\n{email_body}\nEOF\n")
+          email_body = '\n'.join(lines_out)
+
+          github_output = os.environ.get('GITHUB_OUTPUT', '/tmp/github_output.txt')
+          with open(github_output, 'a') as f:
+              subject = f'⚽ 世界杯预测 {datetime.now(timezone(timedelta(hours=8))).strftime("%m/%d")}'
+              f.write(f'subject={subject}\n')
+              f.write(f'body<<EOF\n{email_body}\nEOF\n')
 
           print(email_body)
           PYEOF
-          cat /tmp/github_output.txt >> "$GITHUB_OUTPUT"
 
       - name: Send email
         uses: dawidd6/action-send-mail@v3

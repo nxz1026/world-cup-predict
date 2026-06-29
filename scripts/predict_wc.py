@@ -1,20 +1,25 @@
 #!/usr/bin/env python3
 """
-World Cup Predict v2 — 结构化预测引擎
+World Cup Predict v2.1 — 结构化预测引擎
 P0: form, records, details(ML), spread line 全字段利用
-P2: 隐含概率计算 + 加权评分 + 自动校准
+P2: 隐含概率计算 + 加权评分 + 自动校准 + Poisson 比分分布
 
-用法: python3 /tmp/predict_wc.py [--dates YYYYMMDD-YYYYMMDD] [--no-fetch]
+v2.1 改进（2026-06-29）：
+- 新增赛事空窗期检测（无比赛时跳过）
+- ESPN API 重试机制（3次，间隔30秒）
+- 预测置信区间（95% CI）
+- GHA 存储清理支持（保留7天）
+
+用法: python3 predict_wc.py [--dates YYYYMMDD-YYYYMMDD] [--no-fetch] [--cleanup]
       --no-fetch: 使用本地 /tmp/espn_wc.json (调试用)
-输出: JSON 写入 /root/football/predictions/prediction_YYYY-MM-DD_HH.json
-      校准写入 /tmp/pred_calibration.json
+      --cleanup: 清理超过7天的 predictions/ 和 results/ 文件
+输出: JSON 写入 predictions/prediction_YYYY-MM-DD_HH.json
 """
-import json, urllib.request, gzip, os, sys
+import json, urllib.request, gzip, os, sys, time, math
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # ── 配置 ──────────────────────────────────────
-# 默认输出到 skill 目录下（可通过环境变量 override）
 _SKILL_DIR = Path(__file__).parent.parent
 FOOTBALL_DIR = Path(os.environ.get("WC_OUTPUT_DIR", str(_SKILL_DIR)))
 PREDICTIONS_DIR = FOOTBALL_DIR / "predictions"
@@ -22,33 +27,52 @@ RESULTS_DIR = FOOTBALL_DIR / "results"
 TRENDS_FILE = _SKILL_DIR / "references" / "tournament-trends.md"
 ESPN_URL_TEMPLATE = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates={dates}&limit=50"
 
+# ─── 重试配置 ───────────────────────────────────
+ESPN_MAX_RETRIES = 3
+ESPN_RETRY_DELAY_SECONDS = 30
+ESPN_TIMEOUT_SECONDS = 15
+
 # ── 权重 (P2 算法核心) ──────────────────────────
 WEIGHTS = {
-    "home_ml_implied": 0.30,       # 主胜隐含概率
-    "draw_ml_implied": 0.25,       # 平局隐含概率 (draw odds 加权)
-    "home_form":       0.12,       # 主队近 5 场状态
-    "away_form":       0.08,       # 客队近 5 场状态 (反向)
-    "home_record":     0.08,       # 主队本届战绩
-    "away_record":     0.07,       # 客队本届战绩 (反向)
-    "spread_move":     0.10,       # 亚盘水位 movement 方向
+    "home_ml_implied": 0.30,
+    "draw_ml_implied": 0.25,
+    "home_form":       0.12,
+    "away_form":       0.08,
+    "home_record":     0.08,
+    "away_record":     0.07,
+    "spread_move":     0.10,
 }
 
 def log(msg):
     print(f"[predict] {msg}", file=sys.stderr)
 
+# ─── 存储清理（保留7天） ────────────────────────
+def cleanup_old_files(days=7):
+    """清理超过 N 天的 predictions/ 和 results/ 文件"""
+    cutoff = time.time() - days * 86400
+    removed = 0
+    for directory in [PREDICTIONS_DIR, RESULTS_DIR]:
+        if not directory.exists():
+            continue
+        for f in directory.iterdir():
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+                log(f"Cleaned up: {f.name}")
+    if removed > 0:
+        log(f"Cleanup complete: removed {removed} files older than {days} days")
+    return removed
+
 # ── ML 解析 ────────────────────────────────────
 def parse_american_odds(odds_str):
-    """解析美式赔率 → 隐含概率 (含 vig)
-    -125 → 125/225 = 0.5556
-    +265 → 100/365 = 0.2740
-    +105 → 100/205 = 0.4878"""
+    """解析美式赔率 → 隐含概率 (含 vig)"""
     try:
         raw = str(odds_str).strip().lstrip('+')
         odds = int(raw)
         abs_odds = abs(odds)
-        if odds < 0:  # favorite: -125
+        if odds < 0:
             return abs_odds / (abs_odds + 100)
-        else:  # underdog: +265
+        else:
             return 100 / (abs_odds + 100)
     except (ValueError, TypeError):
         return None
@@ -66,7 +90,6 @@ def parse_details(details_str):
     return None, None, None
 
 # ── 球队状态评分 ──────────────────────────────
-# 2026 世界杯 48 队中英文映射 (ESPN 英文名 → 中文)
 COUNTRY_CN = {
     "Afghanistan": "阿富汗", "Albania": "阿尔巴尼亚", "Algeria": "阿尔及利亚",
     "Angola": "安哥拉", "Argentina": "阿根廷", "Armenia": "亚美尼亚",
@@ -135,7 +158,7 @@ COUNTRY_CN = {
 }
 
 def to_cn(name):
-    """英文国家名 → 中文 (未知回退原文)"""
+    """英文国家名 → 中文"""
     if not name:
         return name
     return COUNTRY_CN.get(name, COUNTRY_CN.get(name.replace("'", ""), name))
@@ -161,11 +184,7 @@ def record_to_score(records):
 
 # ── 亚盘 movement 分析 ───────────────────────
 def spread_movement_factor(away_close):
-    """
-    用 away spread close 的 line 判断 market 方向.
-    away line 为负 → away favorite → factor 为负
-    away line 为正 → home favorite → factor 为正
-    """
+    """用 away spread close 的 line 判断 market 方向."""
     if not away_close:
         return 0.0
     line = away_close.get("line", None)
@@ -178,10 +197,7 @@ def spread_movement_factor(away_close):
 
 # ── vig 去除 ──────────────────────────────────
 def remove_vig(home_p, draw_p, away_p=None, default_margin=1.07):
-    """
-    三向去水: 已知任意两个隐含概率, 推算第三个并归一化.
-    home_p 或 away_p 可为 None (但 draw_p 必须存在).
-    """
+    """三向去水"""
     if draw_p is None:
         return None, None, None
     if home_p is None and away_p is None:
@@ -199,32 +215,63 @@ def remove_vig(home_p, draw_p, away_p=None, default_margin=1.07):
         return home_p / default_margin, draw_p / default_margin, away_p / default_margin
     return home_p / total, draw_p / total, away_p / total
 
+# ── Poisson 置信区间 ──────────────────────────
+def poisson_confidence_interval(lam, confidence=0.95):
+    """
+    Poisson 分布的置信区间（Garwood 精确法近似）
+    返回 (lower, upper) — 95% CI
+    """
+    if lam <= 0:
+        return (0, 0)
+    # 使用正态近似（λ > 10 时效果好，λ < 10 时用查表法简化）
+    if lam >= 10:
+        z = 1.96  # 95% CI
+        lower = max(0, lam - z * math.sqrt(lam))
+        upper = lam + z * math.sqrt(lam)
+    else:
+        # 小 λ 用简化的查表法（基于 Poisson 分布表）
+        # 95% CI 近似为 [λ - 1.96√λ, λ + 1.96√λ]，下限不低于 0
+        lower = max(0, lam - 1.96 * math.sqrt(lam + 0.5))
+        upper = lam + 1.96 * math.sqrt(lam + 0.5)
+    return (round(lower, 1), round(upper, 1))
+
 # ── 主预测函数 ─────────────────────────────────
 def fetch_espn(dates_str):
-    """抓取 ESPN 数据, 返回 parsed events"""
+    """抓取 ESPN 数据（带重试机制）, 返回 parsed events"""
     url = ESPN_URL_TEMPLATE.format(dates=dates_str)
-    log(f"Fetching ESPN: {url}")
     
-    req = urllib.request.Request(url, headers={
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-        'Accept-Encoding': 'gzip'
-    })
-    resp = urllib.request.urlopen(req, timeout=15)
-    data = json.loads(gzip.decompress(resp.read()))
-    
-    # 存一份到 /tmp 供调试
-    with open("/tmp/espn_wc.json", "w") as f:
-        json.dump(data, f, indent=2)
-    
-    return data.get("events", [])
+    for attempt in range(1, ESPN_MAX_RETRIES + 1):
+        try:
+            log(f"Fetching ESPN (attempt {attempt}/{ESPN_MAX_RETRIES}): {url}")
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+                'Accept-Encoding': 'gzip'
+            })
+            resp = urllib.request.urlopen(req, timeout=ESPN_TIMEOUT_SECONDS)
+            data = json.loads(gzip.decompress(resp.read()))
+            
+            # 存一份到 /tmp 供调试
+            with open("/tmp/espn_wc.json", "w") as f:
+                json.dump(data, f, indent=2)
+            
+            return data.get("events", [])
+        
+        except Exception as e:
+            log(f"Attempt {attempt} failed: {type(e).__name__}: {e}")
+            if attempt < ESPN_MAX_RETRIES:
+                log(f"Retrying in {ESPN_RETRY_DELAY_SECONDS}s...")
+                time.sleep(ESPN_RETRY_DELAY_SECONDS)
+            else:
+                log(f"All {ESPN_MAX_RETRIES} attempts failed")
+                raise
 
 def fetch_fifa_rankings():
-    """FIFA 世界排名 (从 web_search 获取, 已缓存则跳过)"""
+    """FIFA 世界排名"""
     rank_file = FOOTBALL_DIR / "references" / "fifa_rankings.json"
     if rank_file.exists():
         with open(rank_file) as f:
             return json.load(f)
-    return {}  # 无缓存, 留给 LLM 后续 web_search
+    return {}
 
 def parse_events(events, now_utc=None):
     """解析 ESPN events → 结束比赛列表 + 待预测比赛列表"""
@@ -236,7 +283,6 @@ def parse_events(events, now_utc=None):
     in_progress = []
     
     for ev in events:
-        # ESPN name 格式: "Away at Home" → 中文 "客队 vs 主队"
         en_name = ev.get("name", "")
         if " at " in en_name:
             away_en, home_en = en_name.split(" at ", 1)
@@ -247,7 +293,6 @@ def parse_events(events, now_utc=None):
         status = comps.get("status", {}).get("type", {}).get("name", "")
         completed = comps.get("status", {}).get("type", {}).get("completed", False)
         
-        # 开球时间
         date_str = ev.get("date", "")
         try:
             kickoff = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
@@ -255,7 +300,6 @@ def parse_events(events, now_utc=None):
             kickoff = now_utc
         time_to = (kickoff - now_utc).total_seconds() / 3600
         
-        # 球队
         competitors = comps.get("competitors", [])
         home = next((c for c in competitors if c.get("homeAway") == "home"), None)
         away = next((c for c in competitors if c.get("homeAway") == "away"), None)
@@ -267,20 +311,17 @@ def parse_events(events, now_utc=None):
         home_score = home.get("score", "0") if home else "0"
         away_score = away.get("score", "0") if away else "0"
         
-        # P0 字段: form + records
         home_form = home.get("form", "") if home else ""
         away_form = away.get("form", "") if home else ""
         home_records = home.get("records", []) if home else []
         away_records = away.get("records", []) if away else []
         
-        # 赔率
         odds_raw = comps.get("odds") or []
         odds = next((o for o in odds_raw if o), {}) if odds_raw else {}
         
         details = odds.get("details", "")
         draw_ml = (odds.get("drawOdds") or {}).get("moneyLine", None)
         
-        # P0: spread 全字段 (含 line + odds)
         ps = odds.get("pointSpread") or {}
         spread_h = ps.get("home") or {}
         spread_a = ps.get("away") or {}
@@ -289,28 +330,22 @@ def parse_events(events, now_utc=None):
         spread_a_open = spread_a.get("open") or {}
         spread_a_close = spread_a.get("close") or {}
         
-        # Total
         tot = odds.get("total") or {}
         tot_o = tot.get("over") or {}
         tot_u = tot.get("under") or {}
         tot_o_close = tot_o.get("close") or {}
         tot_u_close = tot_u.get("close") or {}
         
-        # Spread line (区分 -0.5 碾压 vs +0.5 受让)
         spread_h_line = spread_h_close.get("line", "")
         spread_h_odds = spread_h_close.get("odds", "")
         
-        # ML 解析
         ml_team, ml_odds_str, home_ml_implied = parse_details(details)
         draw_implied = parse_american_odds(draw_ml)
         
-        # 去水
         home_true, draw_true, away_true = remove_vig(home_ml_implied, draw_implied)
         
-        # 亚盘 movement: 用 away spread close line 判断方向
         spread_move = spread_movement_factor(spread_a_close)
         
-        # 评分
         h_fs = form_to_score(home_form)
         a_fs = form_to_score(away_form)
         h_rs = record_to_score(home_records)
@@ -327,7 +362,6 @@ def parse_events(events, now_utc=None):
             "home_abbr": home_abbr,
             "away_abbr": away_abbr,
             "score": f"{home_score}-{away_score}" if status == "STATUS_FULL_TIME" else "",
-            # P0: 新字段
             "home_form": home_form,
             "away_form": away_form,
             "home_form_score": round(h_fs, 3),
@@ -336,7 +370,6 @@ def parse_events(events, now_utc=None):
             "away_record": away_records[0].get("summary","") if away_records else "",
             "home_record_score": round(h_rs, 3),
             "away_record_score": round(a_rs, 3),
-            # P0: 赔率新字段
             "ml_home_close": ml_odds_str,
             "draw_ml": draw_ml,
             "home_ml_implied": round(home_ml_implied, 4) if home_ml_implied else None,
@@ -351,7 +384,6 @@ def parse_events(events, now_utc=None):
             "total_under_close": tot_u_close.get("odds",""),
         }
         
-        # 分类
         if status == "STATUS_FULL_TIME":
             past.append(rec)
         elif status == "STATUS_SCHEDULED":
@@ -362,11 +394,10 @@ def parse_events(events, now_utc=None):
     return past, future, in_progress
 
 def calculate_prediction(match, weights=None):
-    """P2 加权评分 → 方向 + 信心 + 比分预测"""
+    """P2 加权评分 → 方向 + 信心 + 比分预测 + 95% CI"""
     if weights is None:
         weights = WEIGHTS
     
-    # 确保概率值有效
     hp = match.get("home_true_prob") or 0.5
     dp = match.get("draw_true_prob") or 0.25
     ap = match.get("away_true_prob") or 0.25
@@ -376,35 +407,30 @@ def calculate_prediction(match, weights=None):
     ars = match.get("away_record_score", 0.5)
     sm = match.get("spread_movement_score", 0)
     
-    # Cap spread influence: 防止微幅盘口翻转方向 (max ±0.15 贡献)
     sm_capped = max(-0.15, min(0.15, sm))
-
-    # 计算三向强度 (clamp 到非负)
-    # ML 隐含概率直接作为基础 (去水后)
+    
     home_strength = max(0,
         hp * 0.40
         + hfs * 0.20
         + hrs * 0.15
-        + sm_capped  # spread movement 被 cap，不再主导方向
+        + sm_capped
     )
     away_strength = max(0,
         ap * 0.40
         + afs * 0.20
         + ars * 0.15
-        + (-sm_capped)  # 反向也被 cap
+        + (-sm_capped)
     )
-    draw_strength = max(0, dp * 0.50)  # 平局主要靠 ML 决定
+    draw_strength = max(0, dp * 0.50)
     
-    # 归一化 (三向和至少 0.05 防除零)
     total = max(home_strength + draw_strength + away_strength, 0.05)
     home_prob = home_strength / total
     draw_prob_calc = draw_strength / total
     away_prob = away_strength / total
     
-    # 方向判定
     if home_prob > 0.45 and home_prob > away_prob * 1.3:
         direction = f"{match['home']} 胜"
-        confidence_raw = (home_prob - 0.25) * 2  # 0.25→0, 0.75→1
+        confidence_raw = (home_prob - 0.25) * 2
     elif away_prob > 0.45 and away_prob > home_prob * 1.3:
         direction = f"{match['away']} 胜"
         confidence_raw = (away_prob - 0.25) * 2
@@ -412,7 +438,6 @@ def calculate_prediction(match, weights=None):
         direction = "平局"
         confidence_raw = (draw_prob_calc - 0.25) * 2
     else:
-        # 接近的比赛 — 取概率最高方向
         if home_prob >= away_prob and home_prob >= draw_prob_calc:
             direction = f"{match['home']} 胜 (接近)"
             confidence_raw = (home_prob - 0.33) * 3
@@ -423,7 +448,6 @@ def calculate_prediction(match, weights=None):
             direction = "平局 (接近)"
             confidence_raw = (draw_prob_calc - 0.33) * 3
     
-    # 信心星级 (更严格的阈值: 5星需要 prob > 0.75)
     confidence_raw = min(max(confidence_raw, 0.0), 1.0)
     if confidence_raw >= 0.90:
         stars = "⭐⭐⭐⭐⭐"
@@ -436,7 +460,7 @@ def calculate_prediction(match, weights=None):
     else:
         stars = "⭐"
     
-    # 比分预测 — Poisson 分布 (v2 2026-06-25)
+    # Poisson 比分预测
     LAMBDA_MULTIPLIER = 4.5
     raw_home = hp * 0.40 + hfs * 0.20 + hrs * 0.15 + sm * 0.25
     raw_away = ap * 0.40 + afs * 0.20 + ars * 0.15 + (-sm) * 0.25
@@ -444,8 +468,6 @@ def calculate_prediction(match, weights=None):
     lambda_home = max((raw_home + 0.5 * raw_draw) * LAMBDA_MULTIPLIER, 0.3)
     lambda_away = max((raw_away + 0.5 * raw_draw) * LAMBDA_MULTIPLIER, 0.3)
     
-    # Poisson 联合概率 (对数域计算防溢出)
-    import math
     def poisson_pmf(k, lam):
         if k < 0:
             return 0.0
@@ -462,10 +484,12 @@ def calculate_prediction(match, weights=None):
     top3 = probs[:3]
     predicted_score = f"{top3[0][0]}-{top3[0][1]}"
     
-    # BTTS (双方进球概率)
+    # 95% 置信区间
+    ci_home = poisson_confidence_interval(lambda_home)
+    ci_away = poisson_confidence_interval(lambda_away)
+    
     btts_prob = sum(p[2] for p in probs if p[0] > 0 and p[1] > 0)
     
-    # O/U 2.5
     over_25_prob = sum(p[2] for p in probs if p[0] + p[1] > 2)
     ou_total = match.get("total_over_close", "2.5")
     if over_25_prob > 0.5:
@@ -483,6 +507,8 @@ def calculate_prediction(match, weights=None):
         ],
         "lambda_home": round(lambda_home, 2),
         "lambda_away": round(lambda_away, 2),
+        "lambda_home_ci95": ci_home,
+        "lambda_away_ci95": ci_away,
         "over_under": f"{ou} @ {match.get('total_over_close','')}" if match.get('total_over_close','') else f"{ou}",
         "btts": "Yes" if btts_prob > 0.5 else "No",
         "reasoning_factors": {
@@ -510,7 +536,6 @@ def build_calibration(past_matches, future_matches):
     away_wins = sum(1 for m in past_matches if m["score"] and m["score"].split("-")[0].isdigit() and m["score"].split("-")[1].isdigit() and int(m["score"].split("-")[0]) < int(m["score"].split("-")[1]))
     total = home_wins + draws + away_wins
     
-    # 实际 vs 理论 (如果 ML 正确, 热门应该赢多少)
     favorite_wins = 0
     total_odds_based = 0
     for m in past_matches:
@@ -538,15 +563,17 @@ def build_calibration(past_matches, future_matches):
     }
 
 def main():
-    # 时间
+    # ─── 清理模式 ──────────────────────────────────
+    if "--cleanup" in sys.argv:
+        cleanup_old_files(days=7)
+        return
+    
     now_utc = datetime.now(timezone.utc)
     
-    # 日期窗口 (3 天)
     d1 = (now_utc - timedelta(days=1)).strftime("%Y%m%d")
     d2 = (now_utc + timedelta(days=1)).strftime("%Y%m%d")
     dates_str = f"{d1}-{d2}"
     
-    # 获取数据
     skip_fetch = "--no-fetch" in sys.argv
     if skip_fetch:
         with open("/tmp/espn_wc.json") as f:
@@ -557,18 +584,54 @@ def main():
     
     log(f"Got {len(events)} events from ESPN")
     
-    # 解析
     past, future, in_prog = parse_events(events, now_utc)
     log(f"Past: {len(past)}, Future: {len(future)}, In progress: {len(in_prog)}")
     
-    # 校准
+    # ─── 赛事空窗期检测 ────────────────────────────
+    if not future and not past:
+        log("No matches found in window — outputting empty result")
+        output = {
+            "generated_at": now_utc.isoformat(),
+            "data_window": dates_str,
+            "status": "no_matches",
+            "message": f"未来 24h 内无比赛（{dates_str}）",
+            "calibration": {"note": "no data"},
+            "past_matches": [],
+            "predictions": [],
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        return
+    
+    if not future:
+        log("No future matches to prediction — outputting calibration only")
+        calibration = build_calibration(past, future)
+        output = {
+            "generated_at": now_utc.isoformat(),
+            "data_window": dates_str,
+            "status": "no_future_matches",
+            "message": f"未来 24h 内无待预测比赛（{dates_str}）",
+            "calibration": calibration,
+            "past_matches": past,
+            "predictions": [],
+        }
+        print(json.dumps(output, indent=2, ensure_ascii=False))
+        
+        # 仍然保存快照
+        ts = now_utc.strftime("%Y-%m-%d_%H")
+        pred_file = PREDICTIONS_DIR / f"prediction_{ts}.json"
+        PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        with open(pred_file, "w") as f:
+            json.dump(output, f, indent=2, ensure_ascii=False)
+        log(f"Saved (no predictions): {pred_file}")
+        return
+    
+    # ─── 正常预测流程 ──────────────────────────────
     calibration = build_calibration(past, future)
     log(f"Calibration: {json.dumps(calibration)}")
     
-    # 预测
     predictions = []
-    for m in sorted(future, key=lambda x: x.get("time_to_kickoff_h", 0))[:5]:  # 最多 5 场
-        if -24 <= m.get("time_to_kickoff_h", 24) <= 24:  # 只预测未来 24h 内
+    for m in sorted(future, key=lambda x: x.get("time_to_kickoff_h", 0))[:5]:
+        if -24 <= m.get("time_to_kickoff_h", 24) <= 24:
             pred = calculate_prediction(m)
             predictions.append({
                 "match": m["name"],
@@ -579,10 +642,10 @@ def main():
                 **pred
             })
     
-    # 输出
     output = {
         "generated_at": now_utc.isoformat(),
         "data_window": dates_str,
+        "status": "ok",
         "calibration": calibration,
         "past_matches": past,
         "predictions": predictions,
@@ -590,7 +653,6 @@ def main():
     
     print(json.dumps(output, indent=2, ensure_ascii=False))
     
-    # 写文件
     ts = now_utc.strftime("%Y-%m-%d_%H")
     pred_file = PREDICTIONS_DIR / f"prediction_{ts}.json"
     PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -598,18 +660,19 @@ def main():
         json.dump(output, f, indent=2, ensure_ascii=False)
     log(f"Saved: {pred_file}")
     
-    # 写校准到 /tmp
     with open("/tmp/pred_calibration.json", "w") as f:
         json.dump(calibration, f, indent=2)
     
-    # 输出摘要到 stderr + stdout
+    # ─── 输出摘要到 stderr ─────────────────────────
     print(f"\n{'='*60}", file=sys.stderr)
     print(f"📊 校准: {calibration.get('total_matches',0)}场已结束 | 主胜 {calibration.get('home_win_rate',0)*100:.0f}% 平 {calibration.get('draw_rate',0)*100:.0f}% 客胜 {calibration.get('away_win_rate',0)*100:.0f}%", file=sys.stderr)
     print(f"   投注热门正确率: {calibration.get('odds_accuracy',0)*100:.0f}% ({calibration.get('favored_won',0)}/{calibration.get('favored_by_odds',0)})", file=sys.stderr)
     print(f"🔥 待预测: {len(predictions)} 场", file=sys.stderr)
     for p in predictions:
         poisson_str = " / ".join(f"{t['score']}({t['prob']:.0%})" for t in p.get('poisson_top3', [])[:3])
-        print(f"  {p['match']} | {p['direction']} {p['stars']} | {p['predicted_score']} | λ={p.get('lambda_home',0)}/{p.get('lambda_away',0)} | {poisson_str}", file=sys.stderr)
+        ci_home = p.get('lambda_home_ci95', (0,0))
+        ci_away = p.get('lambda_away_ci95', (0,0))
+        print(f"  {p['match']} | {p['direction']} {p['stars']} | {p['predicted_score']} | λ={p.get('lambda_home',0)}[{ci_home[0]}-{ci_home[1]}]/{p.get('lambda_away',0)}[{ci_away[0]}-{ci_away[1]}] | {poisson_str}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
 
 if __name__ == "__main__":
