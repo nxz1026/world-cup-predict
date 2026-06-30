@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-30T09:10:16.979637+00:00",
+  "generated_at": "2026-06-30T09:38:27.219897+00:00",
   "data_window": "20260629-20260701",
   "status": "ok",
   "league": "wc",
@@ -20,13 +20,13 @@
     "odds_accuracy": 0
   },
   "calibration_offset": {
-    "home_correction": 1.0,
-    "draw_correction": 1.0,
-    "away_correction": 1.0,
-    "sample_size": 12,
-    "actual_home_rate": 0.333,
-    "actual_draw_rate": 0.333,
-    "actual_away_rate": 0.333
+    "home_correction": 1.33,
+    "draw_correction": 0.886,
+    "away_correction": 0.784,
+    "sample_size": 88,
+    "actual_home_rate": 0.443,
+    "actual_draw_rate": 0.295,
+    "actual_away_rate": 0.261
   },
   "past_matches": [
     {
@@ -34,7 +34,7 @@
       "status": "STATUS_FULL_TIME",
       "completed": true,
       "kickoff_utc": "2026-06-29T17:00Z",
-      "time_to_kickoff_h": -16.2,
+      "time_to_kickoff_h": -16.6,
       "home": "巴西",
       "away": "日本",
       "home_en": "Brazil",
@@ -68,7 +68,7 @@
       "status": "STATUS_FINAL_PEN",
       "completed": true,
       "kickoff_utc": "2026-06-29T20:30Z",
-      "time_to_kickoff_h": -12.7,
+      "time_to_kickoff_h": -13.1,
       "home": "德国",
       "away": "巴拉圭",
       "home_en": "Germany",
@@ -102,7 +102,7 @@
       "status": "STATUS_FINAL_PEN",
       "completed": true,
       "kickoff_utc": "2026-06-30T01:00Z",
-      "time_to_kickoff_h": -8.2,
+      "time_to_kickoff_h": -8.6,
       "home": "荷兰",
       "away": "摩洛哥",
       "home_en": "Netherlands",
@@ -138,34 +138,34 @@
       "home": "科特迪瓦",
       "away": "挪威",
       "kickoff_utc": "2026-06-30T17:00Z",
-      "time_to_kickoff_h": 7.8,
+      "time_to_kickoff_h": 7.4,
       "direction": "挪威 胜",
       "stars": "⭐⭐",
-      "confidence_score": 0.481,
-      "predicted_score": "1-2",
+      "confidence_score": 0.449,
+      "predicted_score": "2-1",
       "poisson_top3": [
         {
-          "score": "1-2",
-          "prob": 0.0748
-        },
-        {
           "score": "2-1",
-          "prob": 0.0747
+          "prob": 0.081
         },
         {
           "score": "2-2",
-          "prob": 0.0732
+          "prob": 0.0721
+        },
+        {
+          "score": "1-2",
+          "prob": 0.068
         }
       ],
-      "lambda_home": 1.96,
-      "lambda_away": 1.96,
+      "lambda_home": 2.12,
+      "lambda_away": 1.78,
       "lambda_home_ci95": [
         0,
-        5.0
+        5.3
       ],
       "lambda_away_ci95": [
         0,
-        5.0
+        4.7
       ],
       "over_under": "Under -120 @ -120",
       "btts": "No",
@@ -190,9 +190,9 @@
         }
       },
       "reasoning_factors": {
-        "home_ml_true_prob": 0.435,
-        "draw_true_prob": 0.271,
-        "away_ml_true_prob": 0.294,
+        "home_ml_true_prob": 0.551,
+        "draw_true_prob": 0.229,
+        "away_ml_true_prob": 0.22,
         "home_form_score": 0.8,
         "away_form_score": 0.667,
         "home_record_score": 0.5,
@@ -200,9 +200,9 @@
         "spread_movement": -0.167,
         "home_onside_score": 0.332,
         "away_onside_score": 0.412,
-        "home_prob_weighted": 0.294,
-        "draw_prob_weighted": 0.216,
-        "away_prob_weighted": 0.49
+        "home_prob_weighted": 0.318,
+        "draw_prob_weighted": 0.207,
+        "away_prob_weighted": 0.475
       }
     },
     {
@@ -210,34 +210,34 @@
       "home": "法国",
       "away": "瑞典",
       "kickoff_utc": "2026-06-30T21:00Z",
-      "time_to_kickoff_h": 11.8,
+      "time_to_kickoff_h": 11.4,
       "direction": "法国 胜",
       "stars": "⭐⭐⭐",
-      "confidence_score": 0.588,
+      "confidence_score": 0.62,
       "predicted_score": "3-0",
       "poisson_top3": [
         {
           "score": "3-0",
-          "prob": 0.1405
+          "prob": 0.1574
         },
         {
           "score": "2-0",
-          "prob": 0.1358
+          "prob": 0.1475
         },
         {
           "score": "4-0",
-          "prob": 0.109
+          "prob": 0.126
         }
       ],
-      "lambda_home": 3.1,
-      "lambda_away": 0.47,
+      "lambda_home": 3.2,
+      "lambda_away": 0.35,
       "lambda_home_ci95": [
         0,
-        6.8
+        7.0
       ],
       "lambda_away_ci95": [
         0,
-        2.4
+        2.1
       ],
       "over_under": "Over +110 @ +110",
       "btts": "No",
@@ -262,9 +262,9 @@
         }
       },
       "reasoning_factors": {
-        "home_ml_true_prob": 0.722,
-        "draw_true_prob": 0.163,
-        "away_ml_true_prob": 0.115,
+        "home_ml_true_prob": 0.804,
+        "draw_true_prob": 0.12,
+        "away_ml_true_prob": 0.076,
         "home_form_score": 0.8,
         "away_form_score": 0.333,
         "home_record_score": 0.5,
@@ -272,9 +272,9 @@
         "spread_movement": 0.5,
         "home_onside_score": 0.412,
         "away_onside_score": 0.412,
-        "home_prob_weighted": 0.544,
-        "draw_prob_weighted": 0.181,
-        "away_prob_weighted": 0.275
+        "home_prob_weighted": 0.56,
+        "draw_prob_weighted": 0.173,
+        "away_prob_weighted": 0.267
       }
     },
     {
@@ -282,34 +282,34 @@
       "home": "墨西哥",
       "away": "厄瓜多尔",
       "kickoff_utc": "2026-07-01T01:00Z",
-      "time_to_kickoff_h": 15.8,
+      "time_to_kickoff_h": 15.4,
       "direction": "墨西哥 胜",
       "stars": "⭐⭐",
-      "confidence_score": 0.423,
+      "confidence_score": 0.47,
       "predicted_score": "2-1",
       "poisson_top3": [
         {
           "score": "2-1",
-          "prob": 0.0827
+          "prob": 0.0846
         },
         {
           "score": "3-1",
-          "prob": 0.0699
+          "prob": 0.0757
         },
         {
-          "score": "2-2",
-          "prob": 0.0656
+          "score": "2-0",
+          "prob": 0.0599
         }
       ],
-      "lambda_home": 2.54,
-      "lambda_away": 1.58,
+      "lambda_home": 2.69,
+      "lambda_away": 1.41,
       "lambda_home_ci95": [
         0,
-        6.0
+        6.2
       ],
       "lambda_away_ci95": [
         0,
-        4.4
+        4.1
       ],
       "over_under": "Under -165 @ -165",
       "btts": "No",
@@ -334,9 +334,9 @@
         }
       },
       "reasoning_factors": {
-        "home_ml_true_prob": 0.415,
-        "draw_true_prob": 0.322,
-        "away_ml_true_prob": 0.262,
+        "home_ml_true_prob": 0.529,
+        "draw_true_prob": 0.274,
+        "away_ml_true_prob": 0.197,
         "home_form_score": 1.0,
         "away_form_score": 0.667,
         "home_record_score": 0.5,
@@ -344,9 +344,9 @@
         "spread_movement": 0.167,
         "home_onside_score": 0.352,
         "away_onside_score": 0.402,
-        "home_prob_weighted": 0.461,
-        "draw_prob_weighted": 0.225,
-        "away_prob_weighted": 0.314
+        "home_prob_weighted": 0.485,
+        "draw_prob_weighted": 0.215,
+        "away_prob_weighted": 0.3
       }
     }
   ]

@@ -160,9 +160,11 @@ def log(msg):
 
 # ─── 累积校准（回填→预测反馈） ─────────────────
 def load_historical_past_matches(days=30):
-    """读取历史 predictions/ 文件中的 past_matches，去重后返回"""
+    """读取历史 predictions/ 文件中的 past_matches + references/historical_past_matches.json，去重后返回"""
     all_past = []
     cutoff = time.time() - days * 86400
+    
+    # 从 predictions/ 窗口文件读取
     for f in PREDICTIONS_DIR.glob("prediction_*.json"):
         if f.stat().st_mtime < cutoff:
             continue
@@ -171,6 +173,16 @@ def load_historical_past_matches(days=30):
             all_past.extend(d.get("past_matches", []))
         except Exception:
             pass
+    
+    # 从 references/historical_past_matches.json 读取（预填充的历史数据）
+    hist_file = FOOTBALL_DIR / "references" / "historical_past_matches.json"
+    if hist_file.exists():
+        try:
+            hist_data = json.load(open(hist_file))
+            all_past.extend(hist_data)
+        except Exception:
+            pass
+    
     # 去重（同一场比赛可能在多个窗口中出现）
     seen = set()
     unique = []
