@@ -361,7 +361,7 @@ def parse_events(events, now_utc=None):
             "away": away_name,
             "home_abbr": home_abbr,
             "away_abbr": away_abbr,
-            "score": f"{home_score}-{away_score}" if status == "STATUS_FULL_TIME" else "",
+            "score": f"{home_score}-{away_score}" if status in ("STATUS_FULL_TIME", "STATUS_FINAL_PEN", "STATUS_FINAL_ET") else "",
             "home_form": home_form,
             "away_form": away_form,
             "home_form_score": round(h_fs, 3),
@@ -384,7 +384,7 @@ def parse_events(events, now_utc=None):
             "total_under_close": tot_u_close.get("odds",""),
         }
         
-        if status == "STATUS_FULL_TIME":
+        if status in ("STATUS_FULL_TIME", "STATUS_FINAL_PEN", "STATUS_FINAL_ET"):
             past.append(rec)
         elif status == "STATUS_SCHEDULED":
             future.append(rec)
