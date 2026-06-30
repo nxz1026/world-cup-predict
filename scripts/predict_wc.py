@@ -46,6 +46,81 @@ WEIGHTS = {
 def log(msg):
     print(f"[predict] {msg}", file=sys.stderr)
 
+
+# ─── 累积校准（回填→预测反馈） ─────────────────
+def load_historical_past_matches(days=30):
+    """读取历史 predictions/ 文件中的 past_matches，去重后返回"""
+    all_past = []
+    cutoff = time.time() - days * 86400
+    for f in PREDICTIONS_DIR.glob("prediction_*.json"):
+        if f.stat().st_mtime < cutoff:
+            continue
+        try:
+            d = json.load(open(f))
+            all_past.extend(d.get("past_matches", []))
+        except Exception:
+            pass
+    # 去重（同一场比赛可能在多个窗口中出现）
+    seen = set()
+    unique = []
+    for m in all_past:
+        key = f"{m.get('kickoff_utc','')}_{m.get('home','')}_{m.get('away','')}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(m)
+    return unique
+
+
+def compute_calibration_offset(past_matches):
+    """
+    从累积 past_matches 计算 calibration 修正因子。
+    用实际赛果分布 vs 均匀分布(1/3)的比率做软修正。
+    返回 dict 或 None（样本不足时）。
+    """
+    if len(past_matches) < 5:
+        return None
+
+    home_wins = draws = away_wins = 0
+
+    for m in past_matches:
+        score = m.get("score", "")
+        if not score or "-" not in score:
+            continue
+        parts = score.split("-")
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        hs, aws = int(parts[0]), int(parts[1])
+        if hs > aws:
+            home_wins += 1
+        elif hs == aws:
+            draws += 1
+        else:
+            away_wins += 1
+
+    total = home_wins + draws + away_wins
+    if total < 5:
+        return None
+
+    actual_home_rate = home_wins / total
+    actual_draw_rate = draws / total
+    actual_away_rate = away_wins / total
+
+    # 修正因子：实际分布 vs 均匀分布(1/3)的比率
+    # 限制在 [0.5, 2.0] 避免极端
+    home_correction = max(0.5, min(2.0, actual_home_rate / (1/3)))
+    draw_correction = max(0.5, min(2.0, actual_draw_rate / (1/3)))
+    away_correction = max(0.5, min(2.0, actual_away_rate / (1/3)))
+
+    return {
+        "home_correction": round(home_correction, 3),
+        "draw_correction": round(draw_correction, 3),
+        "away_correction": round(away_correction, 3),
+        "sample_size": total,
+        "actual_home_rate": round(actual_home_rate, 3),
+        "actual_draw_rate": round(actual_draw_rate, 3),
+        "actual_away_rate": round(actual_away_rate, 3),
+    }
+
 # ─── 存储清理（保留7天） ────────────────────────
 def cleanup_old_files(days=7):
     """清理超过 N 天的 predictions/ 和 results/ 文件"""
@@ -393,8 +468,11 @@ def parse_events(events, now_utc=None):
     
     return past, future, in_progress
 
-def calculate_prediction(match, weights=None):
-    """P2 加权评分 → 方向 + 信心 + 比分预测 + 95% CI"""
+def calculate_prediction(match, weights=None, calibration_offset=None):
+    """P2 加权评分 → 方向 + 信心 + 比分预测 + 95% CI
+    
+    calibration_offset: dict with home_correction/draw_correction/away_correction
+    """
     if weights is None:
         weights = WEIGHTS
     
@@ -406,6 +484,27 @@ def calculate_prediction(match, weights=None):
     hrs = match.get("home_record_score", 0.5)
     ars = match.get("away_record_score", 0.5)
     sm = match.get("spread_movement_score", 0)
+    
+    # ── 应用 calibration offset 修正隐含概率 ──
+    calibration_note = None
+    if calibration_offset:
+        hc = calibration_offset.get("home_correction", 1.0)
+        dc = calibration_offset.get("draw_correction", 1.0)
+        ac = calibration_offset.get("away_correction", 1.0)
+        
+        # 修正：乘以 offset 后重新归一化
+        hp_corrected = hp * hc
+        dp_corrected = dp * dc
+        ap_corrected = ap * ac
+        total_corrected = hp_corrected + dp_corrected + ap_corrected
+        if total_corrected > 0:
+            hp = hp_corrected / total_corrected
+            dp = dp_corrected / total_corrected
+            ap = ap_corrected / total_corrected
+        
+        calibration_note = f"calibration applied (n={calibration_offset.get('sample_size','?')}, " \
+                           f"home×{hc}/draw×{dc}/away×{ac})"
+        log(calibration_note)
     
     sm_capped = max(-0.15, min(0.15, sm))
     
@@ -629,10 +728,18 @@ def main():
     calibration = build_calibration(past, future)
     log(f"Calibration: {json.dumps(calibration)}")
     
+    # ── 累积校准：从历史 past_matches 计算修正因子 ──
+    historical_past = load_historical_past_matches(days=30)
+    calibration_offset = compute_calibration_offset(historical_past)
+    if calibration_offset:
+        log(f"Calibration offset: {json.dumps(calibration_offset)}")
+    else:
+        log("Calibration offset: insufficient historical data (<5 matches)")
+    
     predictions = []
     for m in sorted(future, key=lambda x: x.get("time_to_kickoff_h", 0))[:5]:
         if -24 <= m.get("time_to_kickoff_h", 24) <= 24:
-            pred = calculate_prediction(m)
+            pred = calculate_prediction(m, calibration_offset=calibration_offset)
             predictions.append({
                 "match": m["name"],
                 "home": m["home"],
@@ -647,6 +754,7 @@ def main():
         "data_window": dates_str,
         "status": "ok",
         "calibration": calibration,
+        "calibration_offset": calibration_offset,
         "past_matches": past,
         "predictions": predictions,
     }
@@ -665,14 +773,20 @@ def main():
     
     # ─── 输出摘要到 stderr ─────────────────────────
     print(f"\n{'='*60}", file=sys.stderr)
-    print(f"📊 校准: {calibration.get('total_matches',0)}场已结束 | 主胜 {calibration.get('home_win_rate',0)*100:.0f}% 平 {calibration.get('draw_rate',0)*100:.0f}% 客胜 {calibration.get('away_win_rate',0)*100:.0f}%", file=sys.stderr)
+    print(f"📊 窗口校准: {calibration.get('total_matches',0)}场已结束 | 主胜 {calibration.get('home_win_rate',0)*100:.0f}% 平 {calibration.get('draw_rate',0)*100:.0f}% 客胜 {calibration.get('away_win_rate',0)*100:.0f}%", file=sys.stderr)
     print(f"   投注热门正确率: {calibration.get('odds_accuracy',0)*100:.0f}% ({calibration.get('favored_won',0)}/{calibration.get('favored_by_odds',0)})", file=sys.stderr)
+    if calibration_offset:
+        print(f"🔧 累积校准(n={calibration_offset['sample_size']}): 主×{calibration_offset['home_correction']} 平×{calibration_offset['draw_correction']} 客×{calibration_offset['away_correction']}", file=sys.stderr)
+        print(f"   实际分布: 主 {calibration_offset['actual_home_rate']} | 平 {calibration_offset['actual_draw_rate']} | 客 {calibration_offset['actual_away_rate']}", file=sys.stderr)
+    else:
+        print(f"🔧 累积校准: 数据不足（<5场），跳过校准", file=sys.stderr)
     print(f"🔥 待预测: {len(predictions)} 场", file=sys.stderr)
     for p in predictions:
         poisson_str = " / ".join(f"{t['score']}({t['prob']:.0%})" for t in p.get('poisson_top3', [])[:3])
         ci_home = p.get('lambda_home_ci95', (0,0))
         ci_away = p.get('lambda_away_ci95', (0,0))
-        print(f"  {p['match']} | {p['direction']} {p['stars']} | {p['predicted_score']} | λ={p.get('lambda_home',0)}[{ci_home[0]}-{ci_home[1]}]/{p.get('lambda_away',0)}[{ci_away[0]}-{ci_away[1]}] | {poisson_str}", file=sys.stderr)
+        cal = ' 📐cal' if calibration_offset else ''
+        print(f"  {p['match']} | {p['direction']} {p['stars']}{cal} | {p['predicted_score']} | λ={p.get('lambda_home',0)}[{ci_home[0]}-{ci_home[1]}]/{p.get('lambda_away',0)}[{ci_away[0]}-{ci_away[1]}] | {poisson_str}", file=sys.stderr)
     print(f"{'='*60}", file=sys.stderr)
 
 if __name__ == "__main__":

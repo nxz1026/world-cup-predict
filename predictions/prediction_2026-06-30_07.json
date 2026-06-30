@@ -1,0 +1,267 @@
+{
+  "generated_at": "2026-06-30T07:49:17.729274+00:00",
+  "data_window": "20260629-20260701",
+  "status": "ok",
+  "calibration": {
+    "total_matches": 3,
+    "home_wins": 1,
+    "draws": 2,
+    "away_wins": 0,
+    "home_win_rate": 0.333,
+    "draw_rate": 0.667,
+    "away_win_rate": 0.0,
+    "favored_by_odds": 0,
+    "favored_won": 0,
+    "odds_accuracy": 0
+  },
+  "past_matches": [
+    {
+      "name": "日本 vs 巴西",
+      "status": "STATUS_FULL_TIME",
+      "completed": true,
+      "kickoff_utc": "2026-06-29T17:00Z",
+      "time_to_kickoff_h": -14.8,
+      "home": "巴西",
+      "away": "日本",
+      "home_abbr": "BRA",
+      "away_abbr": "JPN",
+      "score": "2-1",
+      "home_form": "WWWDW",
+      "away_form": "LDWDW",
+      "home_form_score": 0.867,
+      "away_form_score": 0.533,
+      "home_record": "",
+      "away_record": "",
+      "home_record_score": 0.5,
+      "away_record_score": 0.5,
+      "ml_home_close": null,
+      "draw_ml": null,
+      "home_ml_implied": null,
+      "draw_implied": null,
+      "home_true_prob": null,
+      "draw_true_prob": null,
+      "away_true_prob": null,
+      "spread_home_line": "",
+      "spread_home_close_odds": "",
+      "spread_movement_score": 0.0,
+      "total_over_close": "",
+      "total_under_close": ""
+    },
+    {
+      "name": "巴拉圭 vs 德国",
+      "status": "STATUS_FINAL_PEN",
+      "completed": true,
+      "kickoff_utc": "2026-06-29T20:30Z",
+      "time_to_kickoff_h": -11.3,
+      "home": "德国",
+      "away": "巴拉圭",
+      "home_abbr": "GER",
+      "away_abbr": "PAR",
+      "score": "1-1",
+      "home_form": "LLWWW",
+      "away_form": "WDWLW",
+      "home_form_score": 0.6,
+      "away_form_score": 0.667,
+      "home_record": "",
+      "away_record": "",
+      "home_record_score": 0.5,
+      "away_record_score": 0.5,
+      "ml_home_close": null,
+      "draw_ml": null,
+      "home_ml_implied": null,
+      "draw_implied": null,
+      "home_true_prob": null,
+      "draw_true_prob": null,
+      "away_true_prob": null,
+      "spread_home_line": "",
+      "spread_home_close_odds": "",
+      "spread_movement_score": 0.0,
+      "total_over_close": "",
+      "total_under_close": ""
+    },
+    {
+      "name": "摩洛哥 vs 荷兰",
+      "status": "STATUS_FINAL_PEN",
+      "completed": true,
+      "kickoff_utc": "2026-06-30T01:00Z",
+      "time_to_kickoff_h": -6.8,
+      "home": "荷兰",
+      "away": "摩洛哥",
+      "home_abbr": "NED",
+      "away_abbr": "MAR",
+      "score": "1-1",
+      "home_form": "LWWDW",
+      "away_form": "WWWDD",
+      "home_form_score": 0.667,
+      "away_form_score": 0.733,
+      "home_record": "",
+      "away_record": "",
+      "home_record_score": 0.5,
+      "away_record_score": 0.5,
+      "ml_home_close": null,
+      "draw_ml": null,
+      "home_ml_implied": null,
+      "draw_implied": null,
+      "home_true_prob": null,
+      "draw_true_prob": null,
+      "away_true_prob": null,
+      "spread_home_line": "",
+      "spread_home_close_odds": "",
+      "spread_movement_score": 0.0,
+      "total_over_close": "",
+      "total_under_close": ""
+    }
+  ],
+  "predictions": [
+    {
+      "match": "挪威 vs 科特迪瓦",
+      "home": "科特迪瓦",
+      "away": "挪威",
+      "kickoff_utc": "2026-06-30T17:00Z",
+      "time_to_kickoff_h": 9.2,
+      "direction": "挪威 胜",
+      "stars": "⭐⭐⭐",
+      "confidence_score": 0.594,
+      "predicted_score": "1-1",
+      "poisson_top3": [
+        {
+          "score": "1-1",
+          "prob": 0.0763
+        },
+        {
+          "score": "1-2",
+          "prob": 0.0748
+        },
+        {
+          "score": "2-1",
+          "prob": 0.0747
+        }
+      ],
+      "lambda_home": 1.96,
+      "lambda_away": 1.96,
+      "lambda_home_ci95": [
+        0,
+        5.0
+      ],
+      "lambda_away_ci95": [
+        0,
+        5.0
+      ],
+      "over_under": "Over -120 @ -120",
+      "btts": "Yes",
+      "reasoning_factors": {
+        "home_ml_true_prob": 0.435,
+        "draw_true_prob": 0.271,
+        "away_ml_true_prob": 0.294,
+        "home_form_score": 0.8,
+        "away_form_score": 0.667,
+        "home_record_score": 0.5,
+        "away_record_score": 0.5,
+        "spread_movement": -0.167,
+        "home_prob_weighted": 0.297,
+        "draw_prob_weighted": 0.156,
+        "away_prob_weighted": 0.547
+      }
+    },
+    {
+      "match": "瑞典 vs 法国",
+      "home": "法国",
+      "away": "瑞典",
+      "kickoff_utc": "2026-06-30T21:00Z",
+      "time_to_kickoff_h": 13.2,
+      "direction": "法国 胜",
+      "stars": "⭐⭐⭐⭐⭐",
+      "confidence_score": 1.0,
+      "predicted_score": "3-0",
+      "poisson_top3": [
+        {
+          "score": "3-0",
+          "prob": 0.1405
+        },
+        {
+          "score": "2-0",
+          "prob": 0.1358
+        },
+        {
+          "score": "4-0",
+          "prob": 0.109
+        }
+      ],
+      "lambda_home": 3.1,
+      "lambda_away": 0.47,
+      "lambda_home_ci95": [
+        0,
+        6.8
+      ],
+      "lambda_away_ci95": [
+        0,
+        2.4
+      ],
+      "over_under": "Over +110 @ +110",
+      "btts": "No",
+      "reasoning_factors": {
+        "home_ml_true_prob": 0.722,
+        "draw_true_prob": 0.163,
+        "away_ml_true_prob": 0.115,
+        "home_form_score": 0.8,
+        "away_form_score": 0.333,
+        "home_record_score": 0.5,
+        "away_record_score": 0.5,
+        "spread_movement": 0.5,
+        "home_prob_weighted": 0.85,
+        "draw_prob_weighted": 0.102,
+        "away_prob_weighted": 0.048
+      }
+    },
+    {
+      "match": "厄瓜多尔 vs 墨西哥",
+      "home": "墨西哥",
+      "away": "厄瓜多尔",
+      "kickoff_utc": "2026-07-01T01:00Z",
+      "time_to_kickoff_h": 17.2,
+      "direction": "墨西哥 胜",
+      "stars": "⭐⭐⭐⭐",
+      "confidence_score": 0.791,
+      "predicted_score": "2-1",
+      "poisson_top3": [
+        {
+          "score": "2-1",
+          "prob": 0.0827
+        },
+        {
+          "score": "3-1",
+          "prob": 0.0699
+        },
+        {
+          "score": "2-2",
+          "prob": 0.0656
+        }
+      ],
+      "lambda_home": 2.54,
+      "lambda_away": 1.58,
+      "lambda_home_ci95": [
+        0,
+        6.0
+      ],
+      "lambda_away_ci95": [
+        0,
+        4.4
+      ],
+      "over_under": "Over -165 @ -165",
+      "btts": "Yes",
+      "reasoning_factors": {
+        "home_ml_true_prob": 0.415,
+        "draw_true_prob": 0.322,
+        "away_ml_true_prob": 0.262,
+        "home_form_score": 1.0,
+        "away_form_score": 0.667,
+        "home_record_score": 0.5,
+        "away_record_score": 0.5,
+        "spread_movement": 0.167,
+        "home_prob_weighted": 0.646,
+        "draw_prob_weighted": 0.176,
+        "away_prob_weighted": 0.178
+      }
+    }
+  ]
+}

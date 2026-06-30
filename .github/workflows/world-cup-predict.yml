@@ -108,6 +108,13 @@ jobs:
                   sc = m.get('score', '?')
                   lines_out.append(f'   {display} → {sc}')
 
+          # ── 累积校准信息 ────────────────────────────
+          co = data.get('calibration_offset')
+          if co:
+              lines_out.append('')
+              lines_out.append(f'🔧 累积校准(n={co["sample_size"]}): 主×{co["home_correction"]} 平×{co["draw_correction"]} 客×{co["away_correction"]}')
+              lines_out.append(f'   实际分布: 主 {co["actual_home_rate"]} | 平 {co["actual_draw_rate"]} | 客 {co["actual_away_rate"]}')
+
           email_body = '\n'.join(lines_out)
 
           github_output = os.environ.get('GITHUB_OUTPUT', '/tmp/github_output.txt')
